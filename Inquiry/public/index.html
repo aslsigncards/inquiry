@@ -1,0 +1,557 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Inquiry Group Companion</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background-color: #f3f4f6; -webkit-tap-highlight-color: transparent; }
+        .opposition-btn { box-shadow: 0 10px 25px rgba(220, 38, 38, 0.4); transition: transform 0.1s, box-shadow 0.1s; }
+        .opposition-btn:active { transform: scale(0.95); box-shadow: 0 5px 10px rgba(220, 38, 38, 0.4); }
+        .alert-modal { background: rgba(220, 38, 38, 0.95); backdrop-filter: blur(5px); animation: fadeIn 0.3s ease-out; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes pulse-red { 0%, 100% { background-color: #ef4444; } 50% { background-color: #dc2626; } }
+        .pulse-bg { animation: pulse-red 2s infinite; }
+        .hide { display: none !important; }
+        .safe-pb { padding-bottom: env(safe-area-inset-bottom, 20px); }
+    </style>
+</head>
+<body class="text-slate-800 antialiased min-h-screen flex flex-col relative">
+
+    <header class="bg-white shadow-sm p-4 sticky top-0 z-10 flex justify-between items-center">
+        <h1 class="text-xl font-bold text-slate-800"><i class="fas fa-users mr-2 text-indigo-600"></i>Inquiry Session</h1>
+        <div id="auth-status" class="text-xs font-semibold px-2 py-1 bg-gray-100 rounded-full text-gray-500">
+            <i class="fas fa-circle-notch fa-spin mr-1"></i> Connecting...
+        </div>
+    </header>
+
+    <main class="flex-1 p-4 max-w-lg mx-auto w-full space-y-6 safe-pb">
+        
+        <!-- Protocol Section -->
+        <section class="bg-indigo-50 border border-indigo-100 rounded-xl p-4 text-sm">
+            <div class="flex items-center justify-between mb-2 cursor-pointer" onclick="toggleProtocol()">
+                <h2 class="font-bold text-indigo-900"><i class="fas fa-book-open mr-2"></i>Website Protocol</h2>
+                <i id="protocol-icon" class="fas fa-chevron-down text-indigo-500 transition-transform"></i>
+            </div>
+            <ul id="protocol-content" class="list-disc pl-5 text-indigo-800 space-y-1 hide mt-2">
+                <li>You are signed in anonymously.</li>
+                <li>The opposition button is for discomfort with a plan or an extreme waste of time. Learning is about experiencing new things, so use sparingly.</li>
+                <li>Do not look for who pressed the button. Respect anonymity.</li>
+            </ul>
+        </section>
+
+        <!-- Main Action: Opposition Button -->
+        <section class="flex justify-center py-4">
+            <button onclick="confirmOpposition()" class="opposition-btn pulse-bg w-48 h-48 rounded-full flex flex-col items-center justify-center text-white font-black text-2xl border-4 border-red-700">
+                <i class="fas fa-hand-paper text-5xl mb-2"></i>
+                OPPOSE
+            </button>
+        </section>
+
+        <!-- Polling Section -->
+        <section class="bg-white rounded-xl shadow-sm p-5 border border-slate-200">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="font-bold text-lg"><i class="fas fa-poll mr-2 text-blue-500"></i>Live Polling</h2>
+                <button onclick="openCreatePollModal()" class="text-sm bg-blue-50 text-blue-600 px-3 py-1 rounded-lg font-semibold hover:bg-blue-100">Create</button>
+            </div>
+            
+            <div id="poll-container" class="text-center py-6 text-slate-500">
+                <i class="fas fa-inbox text-3xl mb-2 text-slate-300"></i>
+                <p>No active polls.</p>
+            </div>
+        </section>
+
+        <!-- Feedback Form Link/Trigger -->
+        <section class="bg-white rounded-xl shadow-sm p-5 border border-slate-200 text-center">
+            <h2 class="font-bold text-lg mb-2"><i class="fas fa-clipboard-list mr-2 text-emerald-500"></i>Session Feedback</h2>
+            <p class="text-sm text-slate-600 mb-4">At the end of class, please submit your feedback on communication and direction.</p>
+            <button onclick="openFeedbackModal()" class="w-full bg-emerald-500 text-white font-bold py-3 rounded-xl shadow-sm active:bg-emerald-600">Open Feedback Form</button>
+        </section>
+
+    </main>
+
+    <!-- Alert Modal (Full Screen) -->
+    <div id="alert-modal" class="fixed inset-0 z-50 alert-modal flex flex-col items-center justify-center p-6 hide text-center">
+        <i class="fas fa-exclamation-triangle text-6xl text-white mb-6 animate-bounce"></i>
+        <h2 class="text-3xl font-black text-white mb-4">OPPOSITION TRIGGERED</h2>
+        <p class="text-white text-lg font-medium mb-8">A member has vetoed the current path. Please pause discussion and reassess.</p>
+        <button onclick="dismissAlert()" class="bg-white text-red-600 font-bold py-3 px-8 rounded-full text-lg shadow-lg">Acknowledge</button>
+    </div>
+
+    <!-- Create Poll Modal -->
+    <div id="create-poll-modal" class="fixed inset-0 z-40 bg-black/50 flex items-center justify-center p-4 hide">
+        <div class="bg-white rounded-2xl w-full max-w-md p-6">
+            <h3 class="text-xl font-bold mb-4">Create Quick Poll</h3>
+            <p class="text-xs text-slate-500 mb-4">Polls last exactly 10 seconds. Voting is anonymous.</p>
+            <input type="text" id="poll-question" placeholder="E.g., Pineapple or Banana?" class="w-full border-2 border-slate-200 rounded-lg p-3 mb-4 font-medium focus:outline-none focus:border-blue-500">
+            <div id="poll-options-inputs" class="space-y-2 mb-4">
+                <input type="text" placeholder="Option 1" class="poll-option-input w-full border border-slate-200 rounded-lg p-3 focus:outline-none focus:border-blue-500">
+                <input type="text" placeholder="Option 2" class="poll-option-input w-full border border-slate-200 rounded-lg p-3 focus:outline-none focus:border-blue-500">
+            </div>
+            <button onclick="addOptionInput()" class="text-blue-500 text-sm font-semibold mb-6">+ Add Option</button>
+            <div class="flex space-x-3">
+                <button onclick="closeCreatePollModal()" class="flex-1 bg-slate-100 text-slate-700 font-bold py-3 rounded-xl">Cancel</button>
+                <button onclick="submitNewPoll()" class="flex-1 bg-blue-600 text-white font-bold py-3 rounded-xl">Start (10s)</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Feedback Modal -->
+    <div id="feedback-modal" class="fixed inset-0 z-40 bg-black/50 flex items-end justify-center sm:items-center hide p-0 sm:p-4">
+        <div class="bg-white rounded-t-3xl sm:rounded-2xl w-full max-w-md h-[85vh] sm:h-auto flex flex-col">
+            <div class="p-6 border-b border-slate-100 flex justify-between items-center">
+                <h3 class="text-xl font-bold">Session Feedback</h3>
+                <button onclick="closeFeedbackModal()" class="text-slate-400 text-2xl">&times;</button>
+            </div>
+            <div class="p-6 overflow-y-auto flex-1">
+                <form id="feedback-form" onsubmit="submitFeedback(event)" class="space-y-5">
+                    <div>
+                        <label class="block font-semibold mb-2">How was the communication today?</label>
+                        <textarea id="fb-comm" rows="3" class="w-full border border-slate-200 rounded-lg p-3 focus:outline-none focus:border-emerald-500" placeholder="Observations, thoughts..."></textarea>
+                    </div>
+                    <div>
+                        <label class="block font-semibold mb-2">Any suggestions for direction/content?</label>
+                        <textarea id="fb-content" rows="3" class="w-full border border-slate-200 rounded-lg p-3 focus:outline-none focus:border-emerald-500" placeholder="What should we focus on?"></textarea>
+                    </div>
+                    <div class="bg-red-50 p-4 rounded-xl border border-red-100">
+                        <label class="flex items-start space-x-3">
+                            <input type="checkbox" id="fb-veto" class="mt-1 w-5 h-5 text-red-600 border-gray-300 rounded focus:ring-red-500">
+                            <span class="text-sm font-semibold text-red-900">I wish to VETO the use of this website.</span>
+                        </label>
+                        <div id="veto-rationale-container" class="mt-3 hide">
+                            <label class="block text-xs font-semibold text-red-800 mb-1">Rationale (Required for Veto):</label>
+                            <textarea id="fb-rationale" rows="2" class="w-full border border-red-200 rounded-lg p-2 focus:outline-none focus:border-red-500 text-sm" placeholder="Why is this system not working?"></textarea>
+                        </div>
+                    </div>
+                    <button type="submit" class="w-full bg-emerald-600 text-white font-bold py-3 rounded-xl shadow-sm">Submit Anonymous Feedback</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Custom Confirm Modal -->
+    <div id="confirm-modal" class="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4 hide">
+        <div class="bg-white rounded-2xl w-full max-w-sm p-6 text-center">
+            <h3 class="text-2xl font-black text-red-600 mb-2">Trigger Opposition?</h3>
+            <p class="text-slate-600 mb-6">This will instantly alert everyone in the session. Are you sure?</p>
+            <div class="flex space-x-3">
+                <button onclick="closeConfirm()" class="flex-1 bg-slate-100 text-slate-700 font-bold py-3 rounded-xl">Cancel</button>
+                <button onclick="executeOpposition()" class="flex-1 bg-red-600 text-white font-bold py-3 rounded-xl">Yes, Oppose</button>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, addDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Environment variables
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'inquiry-app-default';
+        const firebaseConfig = {
+        apiKey: "AIzaSyASzwSmvQhrnaKgn-1qSeibB6D3TA9Xfe4",
+        authDomain: "inquiry-collaboration.firebaseapp.com",
+        projectId: "inquiry-collaboration",
+        storageBucket: "inquiry-collaboration.firebasestorage.app",
+        messagingSenderId: "545078386694",
+        appId: "1:545078386694:web:1d4a7b1578d0376e2ea387"
+        };
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        // Initialize Firebase
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        const auth = getAuth(app);
+
+        // State variables
+        let userId = null;
+        const appLoadTime = Date.now();
+        let currentActivePoll = null;
+        let countdownTimer = null;
+        let allVotes = [];
+        let hasVotedLocally = false;
+
+        // UI Elements
+        const authStatus = document.getElementById('auth-status');
+        const alertModal = document.getElementById('alert-modal');
+        const confirmModal = document.getElementById('confirm-modal');
+        const pollContainer = document.getElementById('poll-container');
+        
+        // Setup Auth
+        async function setupAuth() {
+            try {
+                if (initialAuthToken) {
+                    await signInWithCustomToken(auth, initialAuthToken);
+                } else {
+                    await signInAnonymously(auth);
+                }
+                userId = auth.currentUser.uid;
+                authStatus.innerHTML = '<i class="fas fa-user-secret mr-1"></i> Anonymous';
+                authStatus.className = 'text-xs font-semibold px-2 py-1 bg-green-100 rounded-full text-green-700';
+                initListeners();
+            } catch (error) {
+                console.error("Auth Error:", error);
+                authStatus.innerHTML = '<i class="fas fa-exclamation-circle mr-1"></i> Error';
+                authStatus.className = 'text-xs font-semibold px-2 py-1 bg-red-100 rounded-full text-red-700';
+            }
+        }
+
+        function initListeners() {
+            if (!userId) return;
+
+            // 1. Listen for Alerts (Opposition)
+            const alertsRef = collection(db, 'artifacts', appId, 'public', 'data', 'alerts');
+            onSnapshot(alertsRef, (snapshot) => {
+                snapshot.docChanges().forEach((change) => {
+                    if (change.type === "added") {
+                        const alertData = change.doc.data();
+                        // Only show alerts created AFTER this user opened the app
+                        if (alertData.timestamp > appLoadTime) {
+                            showAlert();
+                        }
+                    }
+                });
+            }, (error) => console.error("Alert listener error:", error));
+
+            // 2. Listen for Polls
+            const pollsRef = collection(db, 'artifacts', appId, 'public', 'data', 'polls');
+            onSnapshot(pollsRef, (snapshot) => {
+                let polls = [];
+                snapshot.forEach(doc => polls.push({ id: doc.id, ...doc.data() }));
+                
+                // Find most recently created poll
+                polls.sort((a, b) => b.createdAt - a.createdAt);
+                const latestPoll = polls[0];
+                
+                if (latestPoll) {
+                    handlePollUpdate(latestPoll);
+                }
+            }, (error) => console.error("Poll listener error:", error));
+
+            // 3. Listen for Votes
+            const votesRef = collection(db, 'artifacts', appId, 'public', 'data', 'votes');
+            onSnapshot(votesRef, (snapshot) => {
+                allVotes = [];
+                snapshot.forEach(doc => allVotes.push(doc.data()));
+                
+                // If a poll is currently displaying results, refresh them
+                if (currentActivePoll && currentActivePoll.state === 'results') {
+                    renderPollResults(currentActivePoll);
+                }
+            }, (error) => console.error("Vote listener error:", error));
+        }
+
+        // Instant Opposition: triggers immediately without a confirmation modal
+window.confirmOpposition = async () => {
+    if (!userId) return;
+    
+    // Immediately show the alert locally on the sender's phone
+    showAlert();
+
+    try {
+        const alertsRef = collection(db, 'artifacts', appId, 'public', 'data', 'alerts');
+        await addDoc(alertsRef, { 
+            timestamp: Date.now(),
+            senderId: userId 
+        });
+    } catch (err) {
+        console.error("Failed to trigger opposition:", err);
+    }
+};
+
+// Update listener to display incoming alerts for all connected group members
+function initAlertListener() {
+    const alertsRef = collection(db, 'artifacts', appId, 'public', 'data', 'alerts');
+    onSnapshot(alertsRef, (snapshot) => {
+        snapshot.docChanges().forEach((change) => {
+            if (change.type === "added") {
+                const alertData = change.doc.data();
+                // Fires if created after load, even if sent by another device
+                if (alertData.timestamp >= appLoadTime) {
+                    showAlert();
+                }
+            }
+        });
+    }, (error) => console.error("Alert listener error:", error));
+}
+
+        function showAlert() {
+            // Vibrate if supported
+            if (navigator.vibrate) navigator.vibrate([200, 100, 200, 100, 500]);
+            alertModal.classList.remove('hide');
+        }
+
+        window.dismissAlert = () => {
+            alertModal.classList.add('hide');
+        }
+
+        function handlePollUpdate(poll) {
+            // Check if we switched to a new poll
+            if (!currentActivePoll || currentActivePoll.id !== poll.id) {
+                hasVotedLocally = false;
+            }
+            currentActivePoll = poll;
+            updatePollUI();
+        }
+
+        function updatePollUI() {
+            if (!currentActivePoll) return;
+            
+            clearInterval(countdownTimer);
+            
+            const now = Date.now();
+            if (now < currentActivePoll.endsAt) {
+                // Poll is Active
+                currentActivePoll.state = 'active';
+                renderActivePoll();
+                
+                // Start Timer
+                countdownTimer = setInterval(() => {
+                    const remaining = Math.max(0, Math.floor((currentActivePoll.endsAt - Date.now()) / 1000));
+                    const timerEl = document.getElementById('poll-timer');
+                    if (timerEl) timerEl.innerText = remaining;
+                    
+                    if (remaining <= 0) {
+                        clearInterval(countdownTimer);
+                        currentActivePoll.state = 'results';
+                        renderPollResults(currentActivePoll);
+                    }
+                }, 200);
+            } else {
+                // Poll has ended
+                currentActivePoll.state = 'results';
+                renderPollResults(currentActivePoll);
+            }
+        }
+
+        function renderActivePoll() {
+            const remaining = Math.max(0, Math.floor((currentActivePoll.endsAt - Date.now()) / 1000));
+            
+            let html = `
+                <div class="mb-4">
+                    <h3 class="text-xl font-bold text-slate-800">${escapeHtml(currentActivePoll.question)}</h3>
+                    <div class="text-sm font-bold text-red-500 mt-1 flex items-center justify-center">
+                        <i class="fas fa-stopwatch mr-1 animate-pulse"></i> 
+                        <span id="poll-timer" class="text-xl mx-1">${remaining}</span> seconds left
+                    </div>
+                </div>
+                <div class="space-y-3">
+            `;
+            
+            currentActivePoll.options.forEach((opt, index) => {
+                html += `
+                    <button onclick="castVote('${currentActivePoll.id}', ${index})" 
+                            ${hasVotedLocally ? 'disabled' : ''}
+                            class="w-full py-3 px-4 rounded-xl font-semibold transition-colors 
+                            ${hasVotedLocally ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 active:bg-blue-200'}">
+                        ${escapeHtml(opt)}
+                    </button>
+                `;
+            });
+            
+            html += `</div>`;
+            if (hasVotedLocally) {
+                html += `<p class="mt-4 text-xs font-semibold text-slate-400 uppercase tracking-wider">Vote Recorded. Waiting for timer...</p>`;
+            } else {
+                html += `<p class="mt-4 text-xs text-slate-400">Votes are blind. Results shown when timer ends.</p>`;
+            }
+            
+            pollContainer.innerHTML = html;
+        }
+
+        function renderPollResults(poll) {
+            // Tally votes locally
+            const pollVotes = allVotes.filter(v => v.pollId === poll.id);
+            const counts = new Array(poll.options.length).fill(0);
+            pollVotes.forEach(v => {
+                if (v.optionIndex >= 0 && v.optionIndex < counts.length) counts[v.optionIndex]++;
+            });
+            
+            const totalVotes = pollVotes.length;
+            
+            let html = `
+                <div class="mb-4">
+                    <h3 class="text-lg font-bold text-slate-800 mb-1">${escapeHtml(poll.question)}</h3>
+                    <span class="text-xs font-semibold px-2 py-1 bg-slate-100 text-slate-600 rounded-full">Results Final (${totalVotes} votes)</span>
+                </div>
+                <div class="space-y-3 text-left">
+            `;
+            
+            poll.options.forEach((opt, index) => {
+                const count = counts[index];
+                const percentage = totalVotes > 0 ? Math.round((count / totalVotes) * 100) : 0;
+                
+                // Determine if this is the winning option (or tied for win)
+                const maxVotes = Math.max(...counts);
+                const isWinner = totalVotes > 0 && count === maxVotes;
+                
+                html += `
+                    <div class="relative w-full bg-slate-100 rounded-xl overflow-hidden h-12 flex items-center border ${isWinner ? 'border-blue-300' : 'border-transparent'}">
+                        <div class="absolute top-0 left-0 h-full ${isWinner ? 'bg-blue-200' : 'bg-slate-200'} transition-all duration-500" style="width: ${percentage}%"></div>
+                        <div class="relative z-10 px-4 flex justify-between w-full font-medium ${isWinner ? 'text-blue-900 font-bold' : 'text-slate-700'}">
+                            <span>${escapeHtml(opt)}</span>
+                            <span>${count} <span class="text-xs opacity-70">(${percentage}%)</span></span>
+                        </div>
+                    </div>
+                `;
+            });
+            
+            html += `</div>`;
+            pollContainer.innerHTML = html;
+        }
+
+        window.castVote = async (pollId, optionIndex) => {
+            if (!userId || hasVotedLocally) return;
+            hasVotedLocally = true;
+            
+            // Re-render UI to show loading/disabled state
+            renderActivePoll(); 
+            
+            try {
+                const votesRef = collection(db, 'artifacts', appId, 'public', 'data', 'votes');
+                await addDoc(votesRef, {
+                    pollId: pollId,
+                    optionIndex: optionIndex
+                });
+            } catch (err) {
+                console.error("Failed to cast vote:", err);
+                hasVotedLocally = false;
+                renderActivePoll();
+            }
+        }
+
+        window.openCreatePollModal = () => document.getElementById('create-poll-modal').classList.remove('hide');
+        window.closeCreatePollModal = () => document.getElementById('create-poll-modal').classList.add('hide');
+        
+        window.addOptionInput = () => {
+            const container = document.getElementById('poll-options-inputs');
+            const numOptions = container.children.length;
+            if (numOptions >= 6) return; // Limit to 6 options
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.placeholder = `Option ${numOptions + 1}`;
+            input.className = 'poll-option-input w-full border border-slate-200 rounded-lg p-3 focus:outline-none focus:border-blue-500 mt-2';
+            container.appendChild(input);
+        }
+
+        window.submitNewPoll = async () => {
+            if (!userId) return;
+            const qInput = document.getElementById('poll-question');
+            const inputs = document.querySelectorAll('.poll-option-input');
+            
+            const question = qInput.value.trim() || "Quick Poll";
+            const options = Array.from(inputs).map(i => i.value.trim()).filter(v => v.length > 0);
+            
+            if (options.length < 2) {
+                // Ensure at least two options are present, fallback to defaults
+                if (options.length === 0) options.push("Yes", "No");
+                else if (options.length === 1) options.push("No");
+            }
+
+            closeCreatePollModal();
+            qInput.value = '';
+            document.getElementById('poll-options-inputs').innerHTML = `
+                <input type="text" placeholder="Option 1" class="poll-option-input w-full border border-slate-200 rounded-lg p-3 focus:outline-none focus:border-blue-500">
+                <input type="text" placeholder="Option 2" class="poll-option-input w-full border border-slate-200 rounded-lg p-3 focus:outline-none focus:border-blue-500 mt-2">
+            `;
+
+            try {
+                const pollsRef = collection(db, 'artifacts', appId, 'public', 'data', 'polls');
+                await addDoc(pollsRef, {
+                    question: question,
+                    options: options,
+                    createdAt: Date.now(),
+                    endsAt: Date.now() + 11000 // 11 seconds to account for ~1s propagation delay
+                });
+            } catch (err) {
+                console.error("Failed to create poll:", err);
+            }
+        }
+
+        const fbVetoCheckbox = document.getElementById('fb-veto');
+        const vetoContainer = document.getElementById('veto-rationale-container');
+        
+        fbVetoCheckbox.addEventListener('change', (e) => {
+            if (e.target.checked) {
+                vetoContainer.classList.remove('hide');
+                document.getElementById('fb-rationale').required = true;
+            } else {
+                vetoContainer.classList.add('hide');
+                document.getElementById('fb-rationale').required = false;
+            }
+        });
+
+        window.openFeedbackModal = () => document.getElementById('feedback-modal').classList.remove('hide');
+        window.closeFeedbackModal = () => document.getElementById('feedback-modal').classList.add('hide');
+
+        window.submitFeedback = async (e) => {
+            e.preventDefault();
+            if (!userId) return;
+
+            const comm = document.getElementById('fb-comm').value;
+            const content = document.getElementById('fb-content').value;
+            const isVeto = document.getElementById('fb-veto').checked;
+            const rationale = document.getElementById('fb-rationale').value;
+
+            if (isVeto && !rationale.trim()) {
+                alert("Rationale is required to veto."); // Rare acceptable use of alert as fallback, but better to visually show it.
+                return;
+            }
+
+            try {
+                const feedbackRef = collection(db, 'artifacts', appId, 'public', 'data', 'feedback');
+                await addDoc(feedbackRef, {
+                    timestamp: Date.now(),
+                    communication: comm,
+                    contentSuggestions: content,
+                    vetoWebsite: isVeto,
+                    vetoRationale: isVeto ? rationale : null
+                });
+                
+                // Clear form
+                document.getElementById('feedback-form').reset();
+                vetoContainer.classList.add('hide');
+                closeFeedbackModal();
+                
+                // Replace feedback section content to show success
+                const fbSection = document.querySelector('section:last-of-type');
+                fbSection.innerHTML = `
+                    <div class="text-emerald-500 mb-2"><i class="fas fa-check-circle text-4xl"></i></div>
+                    <h2 class="font-bold text-lg mb-1">Feedback Submitted</h2>
+                    <p class="text-sm text-slate-600">Thank you for your input!</p>
+                `;
+                
+            } catch (err) {
+                console.error("Failed to submit feedback:", err);
+            }
+        }
+
+        window.toggleProtocol = () => {
+            const content = document.getElementById('protocol-content');
+            const icon = document.getElementById('protocol-icon');
+            if (content.classList.contains('hide')) {
+                content.classList.remove('hide');
+                icon.style.transform = 'rotate(180deg)';
+            } else {
+                content.classList.add('hide');
+                icon.style.transform = 'rotate(0deg)';
+            }
+        }
+
+        function escapeHtml(unsafe) {
+            return (unsafe || '').toString()
+                 .replace(/&/g, "&amp;")
+                 .replace(/</g, "&lt;")
+                 .replace(/>/g, "&gt;")
+                 .replace(/"/g, "&quot;")
+                 .replace(/'/g, "&#039;");
+        }
+
+        // Start App
+        setupAuth();
+
+    </script>
+</body>
+</html>
