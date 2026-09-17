@@ -42,7 +42,7 @@
             </ul>
         </section>
 
-        <!-- Main Action: Opposition Button -->
+        <!-- Main Action: Opposition Button (Immediate action, no confirm popup) -->
         <section class="flex justify-center py-4">
             <button onclick="confirmOpposition()" class="opposition-btn pulse-bg w-48 h-48 rounded-full flex flex-col items-center justify-center text-white font-black text-2xl border-4 border-red-700">
                 <i class="fas fa-hand-paper text-5xl mb-2"></i>
@@ -72,7 +72,7 @@
 
     </main>
 
-    <!-- Alert Modal (Full Screen) -->
+    <!-- Alert Modal (Full Screen across all devices) -->
     <div id="alert-modal" class="fixed inset-0 z-50 alert-modal flex flex-col items-center justify-center p-6 hide text-center">
         <i class="fas fa-exclamation-triangle text-6xl text-white mb-6 animate-bounce"></i>
         <h2 class="text-3xl font-black text-white mb-4">OPPOSITION TRIGGERED</h2>
@@ -131,32 +131,19 @@
         </div>
     </div>
 
-    <!-- Custom Confirm Modal -->
-    <div id="confirm-modal" class="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4 hide">
-        <div class="bg-white rounded-2xl w-full max-w-sm p-6 text-center">
-            <h3 class="text-2xl font-black text-red-600 mb-2">Trigger Opposition?</h3>
-            <p class="text-slate-600 mb-6">This will instantly alert everyone in the session. Are you sure?</p>
-            <div class="flex space-x-3">
-                <button onclick="closeConfirm()" class="flex-1 bg-slate-100 text-slate-700 font-bold py-3 rounded-xl">Cancel</button>
-                <button onclick="executeOpposition()" class="flex-1 bg-red-600 text-white font-bold py-3 rounded-xl">Yes, Oppose</button>
-            </div>
-        </div>
-    </div>
-
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, collection, addDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, collection, doc, setDoc, addDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // Environment variables
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'inquiry-app-default';
         const firebaseConfig = {
-        apiKey: "AIzaSyASzwSmvQhrnaKgn-1qSeibB6D3TA9Xfe4",
-        authDomain: "inquiry-collaboration.firebaseapp.com",
-        projectId: "inquiry-collaboration",
-        storageBucket: "inquiry-collaboration.firebasestorage.app",
-        messagingSenderId: "545078386694",
-        appId: "1:545078386694:web:1d4a7b1578d0376e2ea387"
+            apiKey: "AIzaSyASzwSmvQhrnaKgn-1qSeibB6D3TA9Xfe4",
+            authDomain: "inquiry-collaboration.firebaseapp.com",
+            projectId: "inquiry-collaboration",
+            storageBucket: "inquiry-collaboration.firebasestorage.app",
+            messagingSenderId: "545078386694",
+            appId: "1:545078386694:web:1d4a7b1578d0376e2ea387"
         };
         const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
 
@@ -167,7 +154,6 @@
 
         // State variables
         let userId = null;
-        const appLoadTime = Date.now();
         let currentActivePoll = null;
         let countdownTimer = null;
         let allVotes = [];
@@ -176,9 +162,11 @@
         // UI Elements
         const authStatus = document.getElementById('auth-status');
         const alertModal = document.getElementById('alert-modal');
-        const confirmModal = document.getElementById('confirm-modal');
         const pollContainer = document.getElementById('poll-container');
         
+        // Reference to synchronized session state
+        const sessionDocRef = doc(db, 'artifacts', appId, 'public', 'session');
+
         // Setup Auth
         async function setupAuth() {
             try {
@@ -201,30 +189,25 @@
         function initListeners() {
             if (!userId) return;
 
-            // 1. Listen for Alerts (Opposition)
-            const alertsRef = collection(db, 'artifacts', appId, 'public', 'data', 'alerts');
-            onSnapshot(alertsRef, (snapshot) => {
-                snapshot.docChanges().forEach((change) => {
-                    if (change.type === "added") {
-                        const alertData = change.doc.data();
-                        // Only show alerts created AFTER this user opened the app
-                        if (alertData.timestamp > appLoadTime) {
-                            showAlert();
-                        }
+            // 1. Synchronized Opposition Listener across all connected devices
+            onSnapshot(sessionDocRef, (docSnap) => {
+                if (docSnap.exists()) {
+                    const data = docSnap.data();
+                    if (data.oppositionActive === true) {
+                        showAlert();
+                    } else {
+                        hideAlert();
                     }
-                });
-            }, (error) => console.error("Alert listener error:", error));
+                }
+            }, (error) => console.error("Opposition listener error:", error));
 
             // 2. Listen for Polls
             const pollsRef = collection(db, 'artifacts', appId, 'public', 'data', 'polls');
             onSnapshot(pollsRef, (snapshot) => {
                 let polls = [];
                 snapshot.forEach(doc => polls.push({ id: doc.id, ...doc.data() }));
-                
-                // Find most recently created poll
                 polls.sort((a, b) => b.createdAt - a.createdAt);
                 const latestPoll = polls[0];
-                
                 if (latestPoll) {
                     handlePollUpdate(latestPoll);
                 }
@@ -235,60 +218,48 @@
             onSnapshot(votesRef, (snapshot) => {
                 allVotes = [];
                 snapshot.forEach(doc => allVotes.push(doc.data()));
-                
-                // If a poll is currently displaying results, refresh them
                 if (currentActivePoll && currentActivePoll.state === 'results') {
                     renderPollResults(currentActivePoll);
                 }
             }, (error) => console.error("Vote listener error:", error));
         }
 
-        // Instant Opposition: triggers immediately without a confirmation modal
-window.confirmOpposition = async () => {
-    if (!userId) return;
-    
-    // Immediately show the alert locally on the sender's phone
-    showAlert();
-
-    try {
-        const alertsRef = collection(db, 'artifacts', appId, 'public', 'data', 'alerts');
-        await addDoc(alertsRef, { 
-            timestamp: Date.now(),
-            senderId: userId 
-        });
-    } catch (err) {
-        console.error("Failed to trigger opposition:", err);
-    }
-};
-
-// Update listener to display incoming alerts for all connected group members
-function initAlertListener() {
-    const alertsRef = collection(db, 'artifacts', appId, 'public', 'data', 'alerts');
-    onSnapshot(alertsRef, (snapshot) => {
-        snapshot.docChanges().forEach((change) => {
-            if (change.type === "added") {
-                const alertData = change.doc.data();
-                // Fires if created after load, even if sent by another device
-                if (alertData.timestamp >= appLoadTime) {
-                    showAlert();
-                }
+        // Instant Opposition: triggers immediately without confirmation popup
+        window.confirmOpposition = async () => {
+            if (!userId) return;
+            showAlert(); // Instant local feedback
+            try {
+                await setDoc(sessionDocRef, {
+                    oppositionActive: true,
+                    opposedAt: Date.now()
+                }, { merge: true });
+            } catch (err) {
+                console.error("Failed to trigger opposition:", err);
             }
-        });
-    }, (error) => console.error("Alert listener error:", error));
-}
+        };
+
+        // Dismiss Opposition for all users
+        window.dismissAlert = async () => {
+            hideAlert();
+            try {
+                await setDoc(sessionDocRef, {
+                    oppositionActive: false
+                }, { merge: true });
+            } catch (err) {
+                console.error("Failed to dismiss alert:", err);
+            }
+        };
 
         function showAlert() {
-            // Vibrate if supported
             if (navigator.vibrate) navigator.vibrate([200, 100, 200, 100, 500]);
             alertModal.classList.remove('hide');
         }
 
-        window.dismissAlert = () => {
+        function hideAlert() {
             alertModal.classList.add('hide');
         }
 
         function handlePollUpdate(poll) {
-            // Check if we switched to a new poll
             if (!currentActivePoll || currentActivePoll.id !== poll.id) {
                 hasVotedLocally = false;
             }
@@ -303,11 +274,9 @@ function initAlertListener() {
             
             const now = Date.now();
             if (now < currentActivePoll.endsAt) {
-                // Poll is Active
                 currentActivePoll.state = 'active';
                 renderActivePoll();
                 
-                // Start Timer
                 countdownTimer = setInterval(() => {
                     const remaining = Math.max(0, Math.floor((currentActivePoll.endsAt - Date.now()) / 1000));
                     const timerEl = document.getElementById('poll-timer');
@@ -320,7 +289,6 @@ function initAlertListener() {
                     }
                 }, 200);
             } else {
-                // Poll has ended
                 currentActivePoll.state = 'results';
                 renderPollResults(currentActivePoll);
             }
@@ -362,7 +330,6 @@ function initAlertListener() {
         }
 
         function renderPollResults(poll) {
-            // Tally votes locally
             const pollVotes = allVotes.filter(v => v.pollId === poll.id);
             const counts = new Array(poll.options.length).fill(0);
             pollVotes.forEach(v => {
@@ -382,8 +349,6 @@ function initAlertListener() {
             poll.options.forEach((opt, index) => {
                 const count = counts[index];
                 const percentage = totalVotes > 0 ? Math.round((count / totalVotes) * 100) : 0;
-                
-                // Determine if this is the winning option (or tied for win)
                 const maxVotes = Math.max(...counts);
                 const isWinner = totalVotes > 0 && count === maxVotes;
                 
@@ -405,8 +370,6 @@ function initAlertListener() {
         window.castVote = async (pollId, optionIndex) => {
             if (!userId || hasVotedLocally) return;
             hasVotedLocally = true;
-            
-            // Re-render UI to show loading/disabled state
             renderActivePoll(); 
             
             try {
@@ -420,7 +383,7 @@ function initAlertListener() {
                 hasVotedLocally = false;
                 renderActivePoll();
             }
-        }
+        };
 
         window.openCreatePollModal = () => document.getElementById('create-poll-modal').classList.remove('hide');
         window.closeCreatePollModal = () => document.getElementById('create-poll-modal').classList.add('hide');
@@ -428,13 +391,13 @@ function initAlertListener() {
         window.addOptionInput = () => {
             const container = document.getElementById('poll-options-inputs');
             const numOptions = container.children.length;
-            if (numOptions >= 6) return; // Limit to 6 options
+            if (numOptions >= 6) return;
             const input = document.createElement('input');
             input.type = 'text';
             input.placeholder = `Option ${numOptions + 1}`;
             input.className = 'poll-option-input w-full border border-slate-200 rounded-lg p-3 focus:outline-none focus:border-blue-500 mt-2';
             container.appendChild(input);
-        }
+        };
 
         window.submitNewPoll = async () => {
             if (!userId) return;
@@ -445,7 +408,6 @@ function initAlertListener() {
             const options = Array.from(inputs).map(i => i.value.trim()).filter(v => v.length > 0);
             
             if (options.length < 2) {
-                // Ensure at least two options are present, fallback to defaults
                 if (options.length === 0) options.push("Yes", "No");
                 else if (options.length === 1) options.push("No");
             }
@@ -463,12 +425,12 @@ function initAlertListener() {
                     question: question,
                     options: options,
                     createdAt: Date.now(),
-                    endsAt: Date.now() + 11000 // 11 seconds to account for ~1s propagation delay
+                    endsAt: Date.now() + 11000
                 });
             } catch (err) {
                 console.error("Failed to create poll:", err);
             }
-        }
+        };
 
         const fbVetoCheckbox = document.getElementById('fb-veto');
         const vetoContainer = document.getElementById('veto-rationale-container');
@@ -496,7 +458,7 @@ function initAlertListener() {
             const rationale = document.getElementById('fb-rationale').value;
 
             if (isVeto && !rationale.trim()) {
-                alert("Rationale is required to veto."); // Rare acceptable use of alert as fallback, but better to visually show it.
+                alert("Rationale is required to veto.");
                 return;
             }
 
@@ -510,23 +472,20 @@ function initAlertListener() {
                     vetoRationale: isVeto ? rationale : null
                 });
                 
-                // Clear form
                 document.getElementById('feedback-form').reset();
                 vetoContainer.classList.add('hide');
                 closeFeedbackModal();
                 
-                // Replace feedback section content to show success
                 const fbSection = document.querySelector('section:last-of-type');
                 fbSection.innerHTML = `
                     <div class="text-emerald-500 mb-2"><i class="fas fa-check-circle text-4xl"></i></div>
                     <h2 class="font-bold text-lg mb-1">Feedback Submitted</h2>
                     <p class="text-sm text-slate-600">Thank you for your input!</p>
                 `;
-                
             } catch (err) {
                 console.error("Failed to submit feedback:", err);
             }
-        }
+        };
 
         window.toggleProtocol = () => {
             const content = document.getElementById('protocol-content');
@@ -538,7 +497,7 @@ function initAlertListener() {
                 content.classList.add('hide');
                 icon.style.transform = 'rotate(0deg)';
             }
-        }
+        };
 
         function escapeHtml(unsafe) {
             return (unsafe || '').toString()
@@ -549,9 +508,7 @@ function initAlertListener() {
                  .replace(/'/g, "&#039;");
         }
 
-        // Start App
         setupAuth();
-
     </script>
 </body>
 </html>
