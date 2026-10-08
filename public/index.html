@@ -416,7 +416,7 @@ window.confirmOpposition = async () => {
             timestamp: Date.now(),
             senderId: userId,
             // Used by a Firestore TTL policy to auto-delete old alerts
-            expireAt: Timestamp.fromMillis(Date.now() + 24 * 60 * 60 * 1000)
+            expireAt: Timestamp.fromMillis(Date.now() + 60 * 1000)
         });
     } catch (err) {
         console.error("Failed to trigger opposition:", err);
