@@ -223,7 +223,7 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, collection, addDoc, onSnapshot, doc, setDoc, getDocs, writeBatch } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, collection, addDoc, onSnapshot, doc, setDoc, getDoc, getDocs, writeBatch, query, where, orderBy, limit, Timestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // Environment variables
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'inquiry-app-default';
@@ -256,6 +256,8 @@
         let allFeedback = [];
         let allNotes = [];
         let feedbackVisibilityTimer = null;
+        let lastOppositionAt = 0;
+        const OPPOSITION_COOLDOWN_MS = 5000;
 
         // Class schedule: Wednesdays 5:30pm-8:20pm. Feedback goes public at 8:30pm (overshoot buffer)
         // and clears (hides again) once the next class starts.
@@ -357,53 +359,29 @@
             if (!userId) return;
 
             // 1. Listen for Alerts (Opposition)
+            // Only alerts created after this user opened the app are fetched
             const alertsRef = collection(db, 'artifacts', appId, 'public', 'data', 'alerts');
-            onSnapshot(alertsRef, (snapshot) => {
+            onSnapshot(query(alertsRef, where('timestamp', '>', appLoadTime)), (snapshot) => {
                 snapshot.docChanges().forEach((change) => {
-                    if (change.type === "added") {
-                        const alertData = change.doc.data();
-                        // Only show alerts created AFTER this user opened the app
-                        if (alertData.timestamp > appLoadTime) {
-                            showAlert();
-                        }
-                    }
+                    if (change.type === "added") showAlert();
                 });
             }, (error) => console.error("Alert listener error:", error));
 
-            // 2. Listen for Polls
+            // 2. Listen for only the most recent poll
             const pollsRef = collection(db, 'artifacts', appId, 'public', 'data', 'polls');
-            onSnapshot(pollsRef, (snapshot) => {
-                let polls = [];
-                snapshot.forEach(doc => polls.push({ id: doc.id, ...doc.data() }));
-                
-                // Find most recently created poll
-                polls.sort((a, b) => b.createdAt - a.createdAt);
-                const latestPoll = polls[0];
-                
-                if (latestPoll) {
-                    handlePollUpdate(latestPoll);
+            onSnapshot(query(pollsRef, orderBy('createdAt', 'desc'), limit(1)), (snapshot) => {
+                const latestDoc = snapshot.docs[0];
+                if (latestDoc) {
+                    handlePollUpdate({ id: latestDoc.id, ...latestDoc.data() });
                 }
             }, (error) => console.error("Poll listener error:", error));
 
-            // 3. Listen for Votes
-            const votesRef = collection(db, 'artifacts', appId, 'public', 'data', 'votes');
-            onSnapshot(votesRef, (snapshot) => {
-                allVotes = [];
-                snapshot.forEach(voteDoc => allVotes.push(voteDoc.data()));
+            // 3. Votes are fetched once per poll when it ends (see loadPollResults), not streamed live
 
-                const ownVote = currentActivePoll && allVotes.find(v => v.pollId === currentActivePoll.id && v.voterId === userId);
-                if (ownVote?.ranking) localRanking = ownVote.ranking;
-                if (Number.isFinite(ownVote?.sentiment)) localSentiment = ownVote.sentiment;
-                
-                // If a poll is currently displaying results, refresh them
-                if (currentActivePoll && currentActivePoll.state === 'results') {
-                    renderPollResults(currentActivePoll);
-                }
-            }, (error) => console.error("Vote listener error:", error));
-
-            // 4. Listen for Feedback (only ever rendered publicly outside of class hours)
+            // 4. Listen for Feedback from the current session onward (only ever rendered publicly outside of class hours)
             const feedbackRef = collection(db, 'artifacts', appId, 'public', 'data', 'feedback');
-            onSnapshot(feedbackRef, (snapshot) => {
+            const feedbackSince = getMostRecentClassStart(new Date())?.getTime() ?? 0;
+            onSnapshot(query(feedbackRef, where('timestamp', '>=', feedbackSince)), (snapshot) => {
                 allFeedback = [];
                 snapshot.forEach(doc => allFeedback.push(doc.data()));
                 renderFeedbackResults();
@@ -426,6 +404,8 @@
         // Instant Opposition: triggers immediately without a confirmation modal
 window.confirmOpposition = async () => {
     if (!userId) return;
+    if (Date.now() - lastOppositionAt < OPPOSITION_COOLDOWN_MS) return;
+    lastOppositionAt = Date.now();
     
     // Delay local display slightly so it lands in sync with peers, who see it only after the round-trip to Firestore
     setTimeout(showAlert, 250);
@@ -434,28 +414,14 @@ window.confirmOpposition = async () => {
         const alertsRef = collection(db, 'artifacts', appId, 'public', 'data', 'alerts');
         await addDoc(alertsRef, { 
             timestamp: Date.now(),
-            senderId: userId 
+            senderId: userId,
+            // Used by a Firestore TTL policy to auto-delete old alerts
+            expireAt: Timestamp.fromMillis(Date.now() + 24 * 60 * 60 * 1000)
         });
     } catch (err) {
         console.error("Failed to trigger opposition:", err);
     }
 };
-
-// Update listener to display incoming alerts for all connected group members
-function initAlertListener() {
-    const alertsRef = collection(db, 'artifacts', appId, 'public', 'data', 'alerts');
-    onSnapshot(alertsRef, (snapshot) => {
-        snapshot.docChanges().forEach((change) => {
-            if (change.type === "added") {
-                const alertData = change.doc.data();
-                // Fires if created after load, even if sent by another device
-                if (alertData.timestamp >= appLoadTime) {
-                    showAlert();
-                }
-            }
-        });
-    }, (error) => console.error("Alert listener error:", error));
-}
 
         function showAlert() {
             // Vibrate if supported
@@ -467,17 +433,46 @@ function initAlertListener() {
             alertModal.classList.add('hide');
         }
 
-        function handlePollUpdate(poll) {
-            // Check if we switched to a new poll
-            if (!currentActivePoll || currentActivePoll.id !== poll.id) {
+        function votesCollection() {
+            return collection(db, 'artifacts', appId, 'public', 'data', 'votes');
+        }
+
+        async function handlePollUpdate(poll) {
+            const isNewPoll = !currentActivePoll || currentActivePoll.id !== poll.id;
+            currentActivePoll = poll;
+            if (isNewPoll) {
+                allVotes = [];
                 localRanking = poll.options ? poll.options.map((_, index) => index) : [];
                 localSentiment = 50;
-                const ownVote = allVotes.find(vote => vote.pollId === poll.id && vote.voterId === userId);
-                if (ownVote?.ranking) localRanking = ownVote.ranking;
-                if (Number.isFinite(ownVote?.sentiment)) localSentiment = ownVote.sentiment;
+                // Restore this user's own in-progress vote (e.g. after a page reload)
+                if (Date.now() < poll.endsAt) {
+                    try {
+                        const ownVote = (await getDoc(doc(votesCollection(), `${poll.id}_${userId}`))).data();
+                        if (currentActivePoll.id !== poll.id) return;
+                        if (ownVote?.ranking) localRanking = ownVote.ranking;
+                        if (Number.isFinite(ownVote?.sentiment)) localSentiment = ownVote.sentiment;
+                    } catch (err) {
+                        console.error("Failed to load own vote:", err);
+                    }
+                }
             }
-            currentActivePoll = poll;
             updatePollUI();
+        }
+
+        async function loadPollResults(poll) {
+            pollContainer.innerHTML = `<p class="text-sm text-slate-400 py-6"><i class="fas fa-spinner fa-spin mr-1"></i>Tallying results...</p>`;
+            // Short grace period so votes from devices with slightly-off clocks are included
+            const wait = Math.max(0, poll.endsAt + 2000 - Date.now());
+            await new Promise(resolve => setTimeout(resolve, wait));
+            if (currentActivePoll?.id !== poll.id) return;
+            try {
+                const snapshot = await getDocs(query(votesCollection(), where('pollId', '==', poll.id)));
+                if (currentActivePoll?.id !== poll.id) return;
+                allVotes = snapshot.docs.map(voteDoc => voteDoc.data());
+                renderPollResults(poll);
+            } catch (err) {
+                console.error("Failed to load poll results:", err);
+            }
         }
 
         function updatePollUI() {
@@ -500,13 +495,13 @@ function initAlertListener() {
                     if (remaining <= 0) {
                         clearInterval(countdownTimer);
                         currentActivePoll.state = 'results';
-                        renderPollResults(currentActivePoll);
+                        loadPollResults(currentActivePoll);
                     }
                 }, 200);
             } else {
                 // Poll has ended
                 currentActivePoll.state = 'results';
-                renderPollResults(currentActivePoll);
+                loadPollResults(currentActivePoll);
             }
         }
 
@@ -674,7 +669,7 @@ function initAlertListener() {
             document.getElementById('sentiment-face').textContent = sentimentEmoji(localSentiment);
             document.getElementById('sentiment-label').textContent = sentimentLabel(localSentiment);
             clearTimeout(sentimentWriteTimer);
-            sentimentWriteTimer = setTimeout(() => saveCurrentVote({ sentiment: localSentiment }), 120);
+            sentimentWriteTimer = setTimeout(() => saveCurrentVote({ sentiment: localSentiment }), 400);
         }
 
         function sentimentEmoji(value) {
